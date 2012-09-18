@@ -33,6 +33,8 @@
 #include "main/node.h"
 #include "main/reads_aligner.h"
 
+#include "utils/gcsa_writer.h"
+
 using namespace std;
 
 using namespace ppa;
@@ -504,6 +506,11 @@ int main(int argc, char *argv[])
 
         if(Settings_handle::st.is("mpost-graph-file")){
             root->write_sequence_graphs();
+        }
+        
+        if(Settings_handle::st.is("gcsa-outfile")) {
+            GCSA_writer gw;
+            gw.write(Settings_handle::st.get("gcsa-outfile").as<string>(), root);
         }
     }
 

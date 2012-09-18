@@ -219,6 +219,7 @@ int Settings::read_command_line_arguments(int argc, char *argv[])
         ("keep-exonerate-files","keep exonerate files")
         ("recompute-reference-alignment-model", "recompute reference alignment model")
         ("no-score-scaling","no subsistitution score scaling")
+        ("gcsa-outfile", po::value<string>(), "")
     ;
 
     boost::program_options::options_description broken("Broken options",100);
