@@ -15,6 +15,7 @@
 #include "utils/log_output.h"
 #include "utils/model_factory.h"
 
+//#define GCSA_DEBUG 1
 
 using namespace std;
 using namespace ppa;
@@ -36,7 +37,11 @@ class GCSA_writer {
     }
     
     void _flush_buf() {
-        f.write(write_buf, BUFSIZ);
+        //f.write(write_buf, BUFSIZ);
+        if(f.write(write_buf, (char*)buf_head - write_buf).fail()) {
+            Log_output::write_out("Err: write failed flushing buffer to GCSA automata file", 0);
+            abort();
+        }
         _reset_buf();
     }
     
@@ -54,12 +59,38 @@ class GCSA_writer {
      *          into two separate sites and then the edge indices would not be properly
      *          synced
      */
-    // TODO: double check with Ari that the first and last nodes are not part of the
-    //       actual sequence
+    /*
+     start = 21
+     A = 1
+     R = 2
+     N = 3
+     D = 4
+     C = 5
+     Q = 6
+     E = 7
+     G = 8
+     H = 9
+     I = 10
+     L = 11
+     K = 12
+     M = 13
+     F = 14
+     P = 15
+     S = 16
+     T = 17
+     W = 18
+     Y = 19
+     V = 20
+     end = 0
+     */
     void _write_sequence(Sequence* seq) {
-        string alpha = seq->get_full_alphabet();
         vector<Edge>* edges = seq->get_edges();
         vector<Site>* sites = seq->get_sites();
+        
+        //string alpha = seq->get_full_alphabet();
+        string alpha = seq->get_data_type() == Model_factory::protein ? \
+                        Model_factory::get_protein_char_alphabet() :
+                        Model_factory::get_dna_char_alphabet();
         
         // kill if not protein
         if(seq->get_data_type() != Model_factory::protein) {
@@ -68,23 +99,43 @@ class GCSA_writer {
         }
         
         // metadata
-        _write_pair(sites->size(), edges->size());
+        _write_pair(sites->size(), edges->size()-1);
         
+#ifdef GCSA_DEBUG
+        cerr << sites->size() << " nodes\n";
+        cerr << edges->size()-1 << " edges\n";
+#endif
         
         // nodes, start and ends nodes needs special labels
         _write_pair(alpha.size()+1, 0);
+#ifdef GCSA_DEBUG
+        cerr << "node: " << alpha.size()+1 << ":" << 0 << "\n";
+#endif
         
         for(int i = 1; i < int(sites->size() - 1); ++i) {
             _write_pair((*sites)[i].get_state()+1, i);
+        
+#ifdef GCSA_DEBUG
+            cerr << "node: " << (*sites)[i].get_state()+1 << ":" << i << "\n";
+#endif
         }
         
         _write_pair(0, sites->size() - 1);
+#ifdef GCSA_DEBUG
+        cerr << "node: " << 0 << ":" << sites->size()-1 << "\n";
+#endif
         
         
         // edges
-        for(int i = 0; i < int(edges->size()); ++i) {
+        for(int i = 1; i < int(edges->size()); ++i) {
             _write_pair((*edges)[i].get_start_site_index(), (*edges)[i].get_end_site_index());
+            
+#ifdef GCSA_DEBUG
+            cerr << "edge: " << (*edges)[i].get_start_site_index() << ":" << (*edges)[i].get_end_site_index() << "\n";
+#endif
         }
+        
+        _flush_buf();
     }
     
 public:
@@ -106,11 +157,19 @@ public:
         stringstream ss;
         ss << filebasename << "." << index++;
         
+#ifdef GCSA_DEBUG
+        //cerr << ss.str() << "\n";
+#endif
+        
         f.open(ss.str().c_str());
         
         _write_sequence(n->get_sequence());
         
         f.close();
+        
+#ifdef GCSA_DEBUG
+        exit(0);
+#endif
     }
 };
 
