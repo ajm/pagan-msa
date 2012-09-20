@@ -161,6 +161,9 @@ public:
         //cerr << ss.str() << "\n";
 #endif
         
+        // if ever I need to know sequence that went with file
+        //cout << n->get_name() << " = " << index - 1 << "\n";
+        
         f.open(ss.str().c_str());
         
         _write_sequence(n->get_sequence());
