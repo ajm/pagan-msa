@@ -63,6 +63,18 @@ struct Fasta_entry
     int cluster_attempts;
     bool reversed;
     int num_duplicates;
+    
+    // low-memory option
+    string cigar;
+};
+
+enum edit_type { CIGAR_MATCH,
+                 CIGAR_DELETE,
+                 CIGAR_SKIP };
+
+struct Cigar_edit {
+    enum edit_type type;
+    int num;
 };
 
 }

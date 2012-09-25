@@ -138,7 +138,7 @@ void Reads_aligner::align(Node *root, Model_factory *mf, int count)
 
 void Reads_aligner::loop_simple_placement(Node *root, vector<Fasta_entry> *reads, Model_factory *mf, int count)
 {
-
+    
     if(Settings_handle::st.is("discard-pairwise-overlapping-reads"))
     {
         this->remove_overlapping_reads(reads, mf);
@@ -147,11 +147,26 @@ void Reads_aligner::loop_simple_placement(Node *root, vector<Fasta_entry> *reads
     string ref_root_name = root->get_name();
 
     int start_i = 0;
-    if(Settings_handle::st.is("pileup-alignment") && Settings_handle::st.is("queryfile") && !Settings_handle::st.is("ref-seqfile"))
+    if(Settings_handle::st.is("pileup-alignment") && Settings_handle::st.is("queryfile") && !Settings_handle::st.is("ref-seqfile")) {
         start_i = 1;
+    }
+    else {
+        if(Settings_handle::st.is("low-memory")) {
+            Log_output::write_out(" Error: '--low-memory' can only be used with '--pileup-alignment'.\n", 2);
+            abort();
+        }
+    }
 
     int max_attempts = Settings_handle::st.get("query-cluster-attempts").as<int>();
     global_root = root;
+    
+    vector<int> order_mapped;
+    if(start_i == 1) {
+        stringstream ss;
+        ss << reads->at(0).sequence.size() << "M";
+        reads->at(0).cigar = ss.str();
+        order_mapped.push_back(0);
+    }
 
     for(int j=0; j < max_attempts; j++)
     {
@@ -159,6 +174,10 @@ void Reads_aligner::loop_simple_placement(Node *root, vector<Fasta_entry> *reads
         for(int i=start_i;i<(int)reads->size();i++)
         {
 
+            //if(i == 100) {
+            //    while(1) { cout << ""; }
+            //}
+            
             if(reads->at(i).cluster_attempts >= max_attempts)
                 continue;
 
@@ -209,13 +228,34 @@ void Reads_aligner::loop_simple_placement(Node *root, vector<Fasta_entry> *reads
 
             // check if the alignment significantly overlaps with the reference alignment
             //
-            bool read_overlaps = this->read_alignment_overlaps(node, reads->at(i).name, ref_root_name);
+            //bool read_overlaps = this->read_alignment_overlaps(node, reads->at(i).name, ref_root_name);
+            //bool read_overlaps = non_recursive_alignment_overlap(node, reads->at(i).name, ref_root_name);
+
+            bool read_overlaps = false;
+            if(Settings_handle::st.is("low-memory")) {
+                read_overlaps = non_recursive_alignment_overlap(node, reads->at(i).name, ref_root_name);
+            }
+            else {
+                read_overlaps = read_alignment_overlaps(node, reads->at(i).name, ref_root_name);
+            }
 
             if(read_overlaps)
             {
                 reads->at(i).cluster_attempts = max_attempts;
-
+                
+                if(Settings_handle::st.is("low-memory")) {
+                    reads->at(i).cigar = create_cigar(node);
+                    order_mapped.push_back(i);
+                    
+                    delete global_root;
+                    delete reads_node;
+                    
+                    node->has_left_child(false);
+                    node->has_right_child(false);
+                }
+                
                 count++;
+                
                 global_root = node;
             }
             // else delete the node; do not use the read
@@ -229,6 +269,206 @@ void Reads_aligner::loop_simple_placement(Node *root, vector<Fasta_entry> *reads
 
         }
     }
+        
+    //exit(0);
+    
+    // this is slightly dodgy, mostly copy-paste from main.cpp
+    // think through better, are there any other output modes or
+    // reasons to avoid 'low-memory' e.g.: when asked to print
+    // ancestors
+    if(Settings_handle::st.is("low-memory")) {
+        vector<Fasta_entry> aligned_sequences;
+        Fasta_reader fr;
+        
+        get_lowmem_alignment(&aligned_sequences, reads, &order_mapped);
+        
+        Log_output::clean_output();
+        
+        string outfile =  "outfile";
+
+        if(Settings_handle::st.is("outfile"))
+            outfile = Settings_handle::st.get("outfile").as<string>();
+        
+        string format = "fasta";
+        if(Settings_handle::st.is("outformat"))
+            format = Settings_handle::st.get("outformat").as<string>();
+        
+        
+        fr.set_chars_by_line(70);
+        fr.write(outfile, aligned_sequences, format, true);
+        
+        delete global_root;
+        
+        exit(0);
+    }
+}
+
+string Reads_aligner::create_cigar(Node* node) {
+    stringstream ss;
+    
+    Sequence* tmp = node->get_sequence();
+    int match = 0;
+    int deletion = 0;
+    int skip = 0;
+    
+    for(int i = 1; i < (tmp->sites_length() - 1); ++i) {
+        Site_children* offspring = tmp->get_site_at(i)->get_children();
+        
+        if(offspring->right_index != -1) {
+            if(offspring->left_index != -1) {
+                if(deletion != 0) {
+                    ss << deletion << "D";
+                    deletion = 0;
+                }
+                if(skip != 0) {
+                    ss << skip << "S";
+                    skip = 0;
+                }
+                
+                ++match;
+            }
+            else {
+                if(match != 0) {
+                    ss << match << "M";
+                    match = 0;
+                }
+                if(skip != 0) {
+                    ss << skip << "S";
+                    skip = 0;
+                }
+                
+                ++deletion;
+            }
+        }
+        else {
+            if(offspring->left_index != -1) {
+                if(deletion != 0) {
+                    ss << deletion << "D";
+                    deletion = 0;
+                }
+                if(match != 0) {
+                    ss << match << "M";
+                    match = 0;
+                }
+                
+                ++skip;
+            }
+        }
+    }
+    
+    if(match != 0) {
+        ss << match << "M";
+    }
+    if(skip != 0) {
+        ss << skip << "S";
+    }
+    if(deletion != 0) {
+        ss << deletion << "D";
+    }
+    
+    return ss.str();
+}
+
+void Reads_aligner::tokenise(vector<Cigar_edit>& tokens, string& cigar) {
+    size_t prev_index = 0;
+    size_t curr_index = cigar.find_first_of("MDS");
+    
+    while(curr_index != string::npos) {
+        Cigar_edit ce;
+            
+        switch(cigar[curr_index]) {
+            case 'M':
+                ce.type = CIGAR_MATCH;
+                break;
+            case 'D':
+                ce.type = CIGAR_DELETE;
+                break;
+            case 'S':
+                ce.type = CIGAR_SKIP;
+                break;
+            default:
+                cerr << "Err: unknown edit operation '" << cigar[curr_index] << "'\n";
+                abort();
+        }
+        
+        istringstream ss(cigar.substr(prev_index, curr_index - prev_index));
+        ss >> ce.num;
+        
+        //ce.num = atoi(cigar.substr(prev_index, curr_index - prev_index).c_str());
+        
+        prev_index = curr_index + 1;
+        curr_index = cigar.find_first_of("MDS", prev_index);
+        
+        tokens.push_back(ce);
+    }
+}
+
+void Reads_aligner::find_and_pad(string& mask, string& out, int& index) {
+    int prev_index = index;
+    
+    index = mask.find_first_of('m', index + 1);
+    
+    if(size_t(index) == string::npos)
+        index = mask.size();
+    
+    out.append(index - prev_index - 1, '-');
+}
+
+void Reads_aligner::get_lowmem_alignment(vector<Fasta_entry>* aligned_sequences, vector<Fasta_entry>* reads, vector<int>* read_order) {
+    
+    // m = can be matched
+    // x = ignore
+    string mask = string(global_root->get_sequence()->sites_length()-2, 'm');
+    
+    // loop through reads in the reverse order mapped
+    for(int i = read_order->size() - 1; i >= 0; --i) {
+        int current_read = read_order->at(i);
+        
+        Fasta_entry entry;
+        entry.name = reads->at(current_read).name;
+        entry.comment = reads->at(current_read).comment;
+        entry.sequence = "";
+        
+        // use mask + reads->at(i).cigar + sequence in reads->at(i).sequence to write alignments
+        vector<Cigar_edit> edits;
+        tokenise(edits, reads->at(current_read).cigar);
+        
+        int mask_index = -1;
+        int match_index = 0;
+        
+        for(int j = 0; j < int(edits.size()); ++j) {
+            for(int k = 0; k < edits[j].num; ++k) {
+                find_and_pad(mask, entry.sequence, mask_index);
+                
+                switch(edits[j].type) {
+                    case CIGAR_MATCH:
+                        entry.sequence.append(1, reads->at(current_read).sequence[match_index++]);
+                        break;
+                    
+                    case CIGAR_SKIP:
+                        entry.sequence.append("-");
+                        break;
+                    
+                    case CIGAR_DELETE:
+                        entry.sequence.append(1, reads->at(current_read).sequence[match_index++]);
+                        mask[mask_index] = 'x';
+                        break;
+                        
+                    default:
+                        cerr << "Err: unknown edit operation '" << edits[j].type << "'\n";
+                        abort();
+                }
+            }
+        }
+        
+        find_and_pad(mask, entry.sequence, mask_index);
+                
+        aligned_sequences->push_back(entry);
+        
+        //cerr << "\n" << reads->at(current_read).cigar << "\n" << entry.sequence << "\n" << mask << "\n";
+    }
+    
+    //cerr << "\n\n";
 }
 
 void Reads_aligner::loop_two_strand_placement(Node *root, vector<Fasta_entry> *reads, Model_factory *mf, int count)
@@ -1175,6 +1415,111 @@ void Reads_aligner::copy_node_details(Node *reads_node,Fasta_entry *read,bool tu
 
 //}
 
+bool Reads_aligner::non_recursive_alignment_overlap(Node* node, string read_name, string ref_node_name) {
+    float min_overlap = Settings_handle::st.get("min-query-overlap").as<float>();
+    float min_identity = Settings_handle::st.get("min-query-identity").as<float>();
+
+    Sequence *node_sequence = node->get_sequence();
+
+    int aligned = 0;
+    int read_length = 0;
+    int matched = 0;
+
+    if(Settings_handle::st.is("pileup-alignment") && !Settings_handle::st.is("overlap-with-reference"))
+    {
+        for(int j = 0; j < node_sequence->sites_length(); ++j) {
+            Site_children* offspring = node_sequence->get_site_at(j)->get_children();
+            
+            bool read_has_site = offspring->right_index != -1;
+            bool any_other_has_site = offspring->left_index != -1;
+            
+            if(read_has_site)
+                read_length++;
+
+            if(read_has_site and any_other_has_site)
+                aligned++;
+        }
+    }
+    else
+    {
+        abort();
+    }
+    /*
+    else
+    {
+        
+        for( int j=0; j < node_sequence->sites_length(); j++ )
+        {
+            bool read_has_site = node->has_site_at_alignment_column(j,read_name);
+            bool ref_root_has_site = node->has_site_at_alignment_column(j,ref_node_name);
+
+            if(read_has_site)
+                read_length++;
+
+            if(read_has_site && ref_root_has_site)
+            {
+                aligned++;
+
+                int state_read = node->get_state_at_alignment_column(j,read_name);
+                int state_ref  = node->get_state_at_alignment_column(j,ref_node_name);
+                if(state_read == state_ref)
+                    matched++;
+            }
+        }
+    }
+    */
+    
+    //cout << "\n" << read_length << " " << aligned << "\n";
+
+    if( !Settings_handle::st.is("pileup-alignment") )
+    {
+        stringstream ss;
+        ss<<"aligned positions "<<(float)aligned/(float)read_length<<" ["<<aligned<<"/"<<read_length<<"];"<<
+            " identical positions "<<(float)matched/(float)aligned<<" ["<<matched<<"/"<<aligned<<"]"<<endl;
+        Log_output::write_out(ss.str(),2);
+    }
+
+    if(Settings_handle::st.is("pileup-alignment") && !Settings_handle::st.is("overlap-with-reference"))
+    {
+        if( (float)aligned/(float)read_length >= min_overlap )
+            return true;
+        else
+            return false;
+    }
+
+    if( (float)aligned/(float)read_length >= min_overlap && (float)matched/(float)aligned >= min_identity)
+    {
+        return true;
+    }
+    else if( (float)aligned/(float)read_length < min_overlap && (float)matched/(float)aligned < min_identity )
+    {
+        stringstream ss;
+        ss<<"Warning: read "<<read_name<<" dropped using the minimum overlap cut-off of "<<min_overlap<<
+                " and the minimum identity cut-off of "<<min_identity<<"."<<endl;
+        Log_output::write_out(ss.str(),2);
+
+        return false;
+    }
+    else if( (float)aligned/(float)read_length < min_overlap)
+    {
+        stringstream ss;
+        ss<<"Warning: read "<<read_name<<" dropped using the minimum overlap cut-off of "<<min_overlap<<"."<<endl;
+        Log_output::write_out(ss.str(),2);
+
+        return false;
+    }
+    else if( (float)matched/(float)aligned < min_identity)
+    {
+        stringstream ss;
+        ss<<" Warning: read "<<read_name<<" dropped using the minimum identity cut-off of "<<min_identity<<"."<<endl;
+        Log_output::write_out(ss.str(),2);
+
+        return false;
+    }
+
+    return false;
+}
+
 bool Reads_aligner::read_alignment_overlaps(Node * node, string read_name, string ref_node_name)
 {
     float min_overlap = Settings_handle::st.get("min-query-overlap").as<float>();
@@ -1188,6 +1533,21 @@ bool Reads_aligner::read_alignment_overlaps(Node * node, string read_name, strin
 
     if(Settings_handle::st.is("pileup-alignment") && !Settings_handle::st.is("overlap-with-reference"))
     {
+        if(Settings_handle::st.is("low-memory")) {
+            for(int j = 0; j < node_sequence->sites_length(); ++j) {
+                Site_children* offspring = node_sequence->get_site_at(j)->get_children();
+                
+                bool read_has_site = offspring->right_index != -1;
+                bool any_other_has_site = offspring->left_index != -1;
+                
+                if(read_has_site)
+                    read_length++;
+
+                if(read_has_site and any_other_has_site)
+                    aligned++;
+            }
+        }
+        else {
         for( int j=0; j < node_sequence->sites_length(); j++ )
         {
             bool read_has_site = node->has_site_at_alignment_column(j,read_name);
@@ -1200,6 +1560,7 @@ bool Reads_aligner::read_alignment_overlaps(Node * node, string read_name, strin
             {
                 aligned++;
             }
+        }
         }
     }
     else
@@ -1223,6 +1584,8 @@ bool Reads_aligner::read_alignment_overlaps(Node * node, string read_name, strin
             }
         }
     }
+
+    //cout << "\n" << read_length << " " << aligned << "\n";
 
     if( !Settings_handle::st.is("pileup-alignment") )
     {

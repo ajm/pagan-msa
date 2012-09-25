@@ -219,7 +219,8 @@ int Settings::read_command_line_arguments(int argc, char *argv[])
         ("keep-exonerate-files","keep exonerate files")
         ("recompute-reference-alignment-model", "recompute reference alignment model")
         ("no-score-scaling","no subsistitution score scaling")
-        ("gcsa-outfile", po::value<string>(), "")
+        ("gcsa-outfile", po::value<string>(), "output automata encoded for gcsa")
+        ("low-memory", "use less memory (only implemented in pileup without reference)")
     ;
 
     boost::program_options::options_description broken("Broken options",100);

@@ -48,6 +48,12 @@ class Reads_aligner
     void loop_two_strand_placement(Node *root, vector<Fasta_entry> *reads, Model_factory *mf, int count);
     void loop_translated_placement(Node *root, vector<Fasta_entry> *reads, Model_factory *mf, int count);
 
+    string create_cigar(Node* node);
+    void get_lowmem_alignment(vector<Fasta_entry>* aligned_sequences, vector<Fasta_entry>* reads, vector<int>* read_order);
+    void tokenise(vector<Cigar_edit>& tokens, string& cigar);
+    void find_and_pad(string& mask, string& out, int& index);
+    bool non_recursive_alignment_overlap(Node* node, string read_name, string ref_node_name);
+
     void find_orfs(Fasta_entry *read,vector<Orf> *open_frames);
     void define_translation_tables();
     string reverse_complement(string dna);
