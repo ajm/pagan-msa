@@ -23,6 +23,7 @@
 
 #include <string>
 #include <vector>
+#include "utils/settings_handle.h"
 
 using namespace std;
 
@@ -64,15 +65,30 @@ struct Fasta_entry
     bool reversed;
     int num_duplicates;
     
+    double avg_quality;
+    
     // low-memory option
-    string cigar;
+    string edit_string ;
+    
+    bool operator<(const Fasta_entry& rhs) const {
+        //return sequence.size() > rhs.sequence.size();
+        //return avg_quality > rhs.avg_quality;
+        
+        if(Settings_handle::st.is("cluster-quality")) {
+            if(avg_quality != rhs.avg_quality) {
+                return avg_quality > rhs.avg_quality;
+            }
+        }
+        
+        return sequence.size() > rhs.sequence.size();
+    }
 };
 
-enum edit_type { CIGAR_MATCH,
-                 CIGAR_DELETE,
-                 CIGAR_SKIP };
+enum edit_type { EDIT_MATCH,
+                 EDIT_DELETE,
+                 EDIT_SKIP };
 
-struct Cigar_edit {
+struct Edit_operation {
     enum edit_type type;
     int num;
 };

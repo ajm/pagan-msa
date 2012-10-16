@@ -282,6 +282,7 @@ public:
     int get_sumC() { return sumC; }
     int get_sumG() { return sumG; }
     int get_sumT() { return sumT; }
+    int get_sumDNA() { return sumA + sumC + sumG + sumT; }
 
     void add_sumA(int i) { sumA += i; }
     void add_sumC(int i) { sumC += i; }

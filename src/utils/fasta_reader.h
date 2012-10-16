@@ -46,6 +46,16 @@ class Fasta_reader
     void define_translation_tables();
     string DNA_to_protein(string *sequence) const;
     string protein_to_DNA(string *dna,string *prot) const;
+    
+    double calc_average_quality(string& quality) const {
+        int total = 0;
+        
+        for(int i = 0; i < int(quality.size()); ++i) {
+            total += (int(quality.at(i)) - 33);
+        }
+        
+        return total / double(quality.size());
+    }
 
 public:
 

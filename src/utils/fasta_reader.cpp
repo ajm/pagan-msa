@@ -167,6 +167,8 @@ void Fasta_reader::read_fasta(istream & input, vector<Fasta_entry> & seqs, bool 
                 fe.tid = tmp_tid;
                 fe.cluster_attempts = 0;
                 fe.num_duplicates = tmp_ndup;
+                fe.avg_quality = 0.0;
+                fe.edit_string = "";
 
                 seqs.push_back(fe);
                 name = "";
@@ -228,6 +230,8 @@ void Fasta_reader::read_fasta(istream & input, vector<Fasta_entry> & seqs, bool 
         fe.tid = tmp_tid;
         fe.cluster_attempts = 0;
         fe.num_duplicates = tmp_ndup;
+        fe.avg_quality = 0.0;
+        fe.edit_string = "";
 
         seqs.push_back(fe);
     }
@@ -324,6 +328,9 @@ void Fasta_reader::read_fastq(istream & input, vector<Fasta_entry> & seqs) const
             fe.trim_start = 0;
             fe.trim_end = 0;
             fe.cluster_attempts = 0;
+            
+            fe.avg_quality = calc_average_quality(fe.quality);
+            fe.edit_string = "";
 
             seqs.push_back(fe);
         }
@@ -420,8 +427,10 @@ void Fasta_reader::trim_fastq_reads(vector<Fasta_entry> * seqs) const throw (Exc
                     +Log_output::itos(minimum_length)+"; the read is discarded.\n",2);
             seqs->erase(fit);
         }
-        else
+        else {
+            fit->avg_quality = calc_average_quality(fit->quality);
             fit++;
+        }
 
     }
 }

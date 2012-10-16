@@ -32,7 +32,6 @@
 #include "utils/log_output.h"
 #include "main/node.h"
 #include "main/reads_aligner.h"
-
 #include "utils/gcsa_writer.h"
 
 using namespace std;

@@ -22,6 +22,7 @@
 #include "utils/exonerate_reads.h"
 #include "utils/text_utils.h"
 #include "utils/log_output.h"
+#include "utils/cluster.h"
 #include <sstream>
 #include <fstream>
 #include <algorithm>
@@ -103,6 +104,14 @@ void Reads_aligner::align(Node *root, Model_factory *mf, int count)
     {
         this->add_trimming_comment( &reads );
     }
+    
+    
+    if(Settings_handle::st.is("create-clusters"))
+    {
+        Log_output::write_header("clustering reads: simple placement",0);
+        this->create_clusters(root, &reads, mf, count);
+    }
+    
 
     // No search for optimal node or TID tags in the tree
     //
@@ -164,7 +173,7 @@ void Reads_aligner::loop_simple_placement(Node *root, vector<Fasta_entry> *reads
     if(start_i == 1) {
         stringstream ss;
         ss << reads->at(0).sequence.size() << "M";
-        reads->at(0).cigar = ss.str();
+        reads->at(0).edit_string = ss.str();
         order_mapped.push_back(0);
     }
 
@@ -244,7 +253,7 @@ void Reads_aligner::loop_simple_placement(Node *root, vector<Fasta_entry> *reads
                 reads->at(i).cluster_attempts = max_attempts;
                 
                 if(Settings_handle::st.is("low-memory")) {
-                    reads->at(i).cigar = create_cigar(node);
+                    reads->at(i).edit_string = create_edit_string(node);
                     order_mapped.push_back(i);
                     
                     delete global_root;
@@ -273,9 +282,8 @@ void Reads_aligner::loop_simple_placement(Node *root, vector<Fasta_entry> *reads
     //exit(0);
     
     // this is slightly dodgy, mostly copy-paste from main.cpp
-    // think through better, are there any other output modes or
-    // reasons to avoid 'low-memory' e.g.: when asked to print
-    // ancestors
+    // need to think through better, are there any other output modes or
+    // reasons to avoid 'low-memory' e.g.: when asked to print ancestors
     if(Settings_handle::st.is("low-memory")) {
         vector<Fasta_entry> aligned_sequences;
         Fasta_reader fr;
@@ -303,7 +311,149 @@ void Reads_aligner::loop_simple_placement(Node *root, vector<Fasta_entry> *reads
     }
 }
 
-string Reads_aligner::create_cigar(Node* node) {
+void Reads_aligner::create_clusters(Node *root, vector<Fasta_entry> *reads, Model_factory *mf, int count) {
+    
+    if(Settings_handle::st.is("discard-pairwise-overlapping-reads")) {
+        this->remove_overlapping_reads(reads, mf);
+    }
+    
+    if(not (Settings_handle::st.is("pileup-alignment") && Settings_handle::st.is("queryfile") && !Settings_handle::st.is("ref-seqfile"))) {
+        Log_output::write_out(" Error: '--create-clusters' can only be used with '--pileup-alignment', '--queryfile' and not '--ref-seqfile'.\n", 2);
+        abort();
+    }
+
+    // sort into order of length
+    if(not Settings_handle::st.is("cluster-unsorted")) {
+        sort(reads->begin(), reads->end());
+    }
+    
+    Node* n = new Node();
+    copy_node_details(n, &reads->at(0));
+
+    
+    // vectors of clusters
+    vector<Cluster*> clusters;
+    double cluster_threshold = Settings_handle::st.get("cluster-identity").as<float>();
+    bool fast_cluster(Settings_handle::st.is("cluster-fast"));
+    
+    // create initial cluster with first sequence (obviously quite arbitrary)
+    Cluster* c = new Cluster(n, 0);
+    clusters.push_back(c);
+    
+    // phoney edit string
+    stringstream ss;
+    ss << reads->at(0).sequence.size() << "M";
+    reads->at(0).edit_string = ss.str();
+    
+    // try each read on all clusters, if none work, create new cluster
+    for(int i = 1; i< int(reads->size()); ++i) {
+        
+        stringstream ss;
+        ss << "#" << count << "#";
+        
+        Node* reads_node = new Node();
+        copy_node_details(reads_node, &reads->at(i));
+        
+        vector<double> identities(clusters.size(), 0.0);
+        
+        // calculate %identity to each cluster
+        
+        // to use openmp align_sequences_this_node must have critical
+        // sections marked
+        
+        //#pragma openmp parallel for
+        for(int j = 0; j < int(clusters.size()); ++j) {
+            ss.str(string());
+            ss << "aligning read " << i << " to cluster " << j;
+            Log_output::write_msg(ss.str(), 0);
+            
+            identities[j] = clusters[j]->add_to_cluster(reads_node, mf, i);
+            
+            if(fast_cluster and (identities[j] > cluster_threshold)) {
+                break;
+            }
+        }
+        
+        // find the max
+        double max_identity = *max_element(identities.begin(), identities.end());
+        
+        // not close enough, create new cluster
+        if(max_identity < cluster_threshold) {
+            Cluster* tmp = new Cluster(reads_node, i);
+            clusters.push_back(tmp);
+            
+            ss.str(string());
+            ss << reads->at(i).sequence.size() << "M";
+            reads->at(i).edit_string = ss.str();
+        }
+        else {
+            // remove from clusters that did not have the max identity
+            if(not fast_cluster) {
+                // what to do if belongs to several clusters?
+                if(std::count(identities.begin(), identities.end(), max_identity) != 1) {
+                    //Log_output::write_out(" Error: more that one cluster?\n", 2);
+                    //abort();
+                    
+                    // best to cluster with the first one, as the sequences will be longer
+                    // (assuming the user does not set --cluster-quality)
+                    *find(identities.begin(), identities.end(), max_identity) + 0.01;
+                }
+                
+                for(int j = 0; j < int(clusters.size()); ++j) {
+                    if(identities[j] != max_identity) {
+                        // clean
+                        clusters[j]->remove_previous_read();
+                    }
+                    else {
+                        // create and set edit string in fasta_entry
+                        reads->at(i).edit_string = create_edit_string(clusters[j]->get_root());
+                    }
+                }
+            }
+        }
+    }
+    
+    
+    Log_output::clean_output();
+    
+    
+    Fasta_reader fr;
+    fr.set_chars_by_line(70);
+    
+    string format = "fasta";
+    if(Settings_handle::st.is("outformat"))
+        format = Settings_handle::st.get("outformat").as<string>();
+    
+    // this is slightly dodgy, mostly copy-paste from main.cpp
+    for(int j = 0; j < int(clusters.size()); j++) {
+        
+        vector<Fasta_entry> aligned_sequences;
+    
+        global_root = clusters[j]->get_root();
+    
+        get_lowmem_alignment(&aligned_sequences, reads, clusters[j]->get_members());
+    
+        
+        string outfile =  "outfile";
+
+        if(Settings_handle::st.is("outfile"))
+            outfile = Settings_handle::st.get("outfile").as<string>();
+        
+        stringstream ss;
+        ss << outfile << ".cluster." << j;
+        outfile = ss.str();
+        
+        // write out
+        fr.write(outfile, aligned_sequences, format, true);
+        
+        // free cluster
+        delete clusters[j];
+    }
+    
+    exit(0); // avoid all the output stuff in main
+}
+
+string Reads_aligner::create_edit_string(Node* node) {
     stringstream ss;
     
     Sequence* tmp = node->get_sequence();
@@ -369,35 +519,35 @@ string Reads_aligner::create_cigar(Node* node) {
     return ss.str();
 }
 
-void Reads_aligner::tokenise(vector<Cigar_edit>& tokens, string& cigar) {
+void Reads_aligner::tokenise(vector<Edit_operation>& tokens, string& editstr) {
     size_t prev_index = 0;
-    size_t curr_index = cigar.find_first_of("MDS");
+    size_t curr_index = editstr.find_first_of("MDS");
     
     while(curr_index != string::npos) {
-        Cigar_edit ce;
+        Edit_operation ce;
             
-        switch(cigar[curr_index]) {
+        switch(editstr[curr_index]) {
             case 'M':
-                ce.type = CIGAR_MATCH;
+                ce.type = EDIT_MATCH;
                 break;
             case 'D':
-                ce.type = CIGAR_DELETE;
+                ce.type = EDIT_DELETE;
                 break;
             case 'S':
-                ce.type = CIGAR_SKIP;
+                ce.type = EDIT_SKIP;
                 break;
             default:
-                cerr << "Err: unknown edit operation '" << cigar[curr_index] << "'\n";
+                cerr << "Err: unknown edit operation '" << editstr[curr_index] << "'\n";
                 abort();
         }
         
-        istringstream ss(cigar.substr(prev_index, curr_index - prev_index));
+        istringstream ss(editstr.substr(prev_index, curr_index - prev_index));
         ss >> ce.num;
         
-        //ce.num = atoi(cigar.substr(prev_index, curr_index - prev_index).c_str());
+        //ce.num = atoi(editstr.substr(prev_index, curr_index - prev_index).c_str());
         
         prev_index = curr_index + 1;
-        curr_index = cigar.find_first_of("MDS", prev_index);
+        curr_index = editstr.find_first_of("MDS", prev_index);
         
         tokens.push_back(ce);
     }
@@ -429,9 +579,9 @@ void Reads_aligner::get_lowmem_alignment(vector<Fasta_entry>* aligned_sequences,
         entry.comment = reads->at(current_read).comment;
         entry.sequence = "";
         
-        // use mask + reads->at(i).cigar + sequence in reads->at(i).sequence to write alignments
-        vector<Cigar_edit> edits;
-        tokenise(edits, reads->at(current_read).cigar);
+        // use mask + reads->at(i).edit_string + sequence in reads->at(i).sequence to write alignments
+        vector<Edit_operation> edits;
+        tokenise(edits, reads->at(current_read).edit_string);
         
         int mask_index = -1;
         int match_index = 0;
@@ -441,15 +591,15 @@ void Reads_aligner::get_lowmem_alignment(vector<Fasta_entry>* aligned_sequences,
                 find_and_pad(mask, entry.sequence, mask_index);
                 
                 switch(edits[j].type) {
-                    case CIGAR_MATCH:
+                    case EDIT_MATCH:
                         entry.sequence.append(1, reads->at(current_read).sequence[match_index++]);
                         break;
                     
-                    case CIGAR_SKIP:
+                    case EDIT_SKIP:
                         entry.sequence.append("-");
                         break;
                     
-                    case CIGAR_DELETE:
+                    case EDIT_DELETE:
                         entry.sequence.append(1, reads->at(current_read).sequence[match_index++]);
                         mask[mask_index] = 'x';
                         break;
@@ -465,7 +615,7 @@ void Reads_aligner::get_lowmem_alignment(vector<Fasta_entry>* aligned_sequences,
                 
         aligned_sequences->push_back(entry);
         
-        //cerr << "\n" << reads->at(current_read).cigar << "\n" << entry.sequence << "\n" << mask << "\n";
+        //cerr << "\n" << reads->at(current_read).edit_string << "\n" << entry.sequence << "\n" << mask << "\n";
     }
     
     //cerr << "\n\n";

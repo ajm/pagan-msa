@@ -55,7 +55,9 @@ HEADERS       = utils/text_utils.h \
 		main/basic_alignment.h \
 		main/viterbi_alignment.h \
 		main/reference_alignment.h \
-		main/reads_aligner.h
+		main/reads_aligner.h \
+        utils/gcsa_writer.h \
+        utils/cluster.h
 SOURCES       = main.cpp \
 		utils/text_utils.cpp \
 		utils/settings.cpp \
@@ -77,7 +79,8 @@ SOURCES       = main.cpp \
 		main/basic_alignment.cpp \
 		main/viterbi_alignment.cpp \
 		main/reference_alignment.cpp \
-		main/reads_aligner.cpp
+		main/reads_aligner.cpp \
+        utils/cluster.cpp
 OBJECTS       = main.o \
 		text_utils.o \
 		settings.o \
@@ -99,7 +102,8 @@ OBJECTS       = main.o \
 		reference_alignment.o \
 		viterbi_alignment.o \
 		basic_alignment.o \
-		reads_aligner.o
+		reads_aligner.o \
+        cluster.o
 TARGET   = pagan
 
 first: all
@@ -162,7 +166,8 @@ main.o: main.cpp utils/settings.h \
 		utils/fasta_reader.h \
 		utils/xml_writer.h \
 		utils/optimal_reference.h \
-		main/reads_aligner.h
+		main/reads_aligner.h \
+        utils/gcsa_writer.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o main.o main.cpp
 
 text_utils.o: utils/text_utils.cpp utils/text_utils.h \
@@ -356,7 +361,8 @@ reads_aligner.o: main/reads_aligner.cpp main/reads_aligner.h \
 		main/basic_alignment.h \
 		main/reference_alignment.h \
 		utils/exonerate_reads.h \
-		utils/text_utils.h
+		utils/text_utils.h \
+        utils/cluster.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o reads_aligner.o main/reads_aligner.cpp
 
 check_version.o: utils/check_version.cpp utils/check_version.h \
@@ -402,6 +408,13 @@ log_output.o: utils/log_output.cpp utils/log_output.h \
 		utils/settings_handle.h \
 		utils/settings.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o log_output.o utils/log_output.cpp
+
+cluster.o: utils/cluster.cpp utils/cluster.h \
+		main/node.h \
+        utils/model_factory.h 
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o cluster.o utils/cluster.cpp
+
+
 
 ####### Install
 

@@ -222,6 +222,15 @@ int Settings::read_command_line_arguments(int argc, char *argv[])
         ("gcsa-outfile", po::value<string>(), "output automata encoded for gcsa")
         ("low-memory", "use less memory (only implemented in pileup without reference)")
     ;
+    
+    boost::program_options::options_description clustering("Clustering options",100);
+    clustering.add_options()
+        ("create-clusters", "create clusters of reads")
+        ("cluster-identity", po::value<float>()->default_value(0.97), "identity threshold (default: 0.97)")
+        ("cluster-fast", "add to the first cluster found that satifies identity")
+        ("cluster-quality", "sort reads based on quality, then length (default: by length only)")
+        ("cluster-unsorted", "do not sort reads prior to clustering")
+    ;
 
     boost::program_options::options_description broken("Broken options",100);
     broken.add_options()
@@ -237,9 +246,9 @@ int Settings::read_command_line_arguments(int argc, char *argv[])
     po::positional_options_description pd;
     pd.add("config-file", 1);
 
-    full_desc.add(minimal).add(generic).add(reads_alignment).add(reads_alignment2).add(reads_alignment3).add(reads_alignment4).add(exonerate).add(pileup).add(obscure).add(model).add(graph).add(tree_edit).add(alignment).add(output).add(debug).add(broken).add(help_update);
-    desc.add(minimal).add(generic).add(reads_alignment).add(reads_alignment2).add(reads_alignment3).add(reads_alignment4).add(exonerate).add(pileup).add(model).add(tree_edit).add(alignment).add(help_update);
-    max_desc.add(minimal).add(generic).add(reads_alignment).add(reads_alignment2).add(reads_alignment3).add(reads_alignment4).add(exonerate).add(pileup).add(obscure).add(model).add(graph).add(tree_edit).add(alignment).add(output).add(help_update);
+    full_desc.add(minimal).add(generic).add(reads_alignment).add(reads_alignment2).add(reads_alignment3).add(reads_alignment4).add(exonerate).add(pileup).add(clustering).add(obscure).add(model).add(graph).add(tree_edit).add(alignment).add(output).add(debug).add(broken).add(help_update);
+    desc.add(minimal).add(generic).add(reads_alignment).add(reads_alignment2).add(reads_alignment3).add(reads_alignment4).add(exonerate).add(pileup).add(clustering).add(model).add(tree_edit).add(alignment).add(help_update);
+    max_desc.add(minimal).add(generic).add(reads_alignment).add(reads_alignment2).add(reads_alignment3).add(reads_alignment4).add(exonerate).add(pileup).add(clustering).add(obscure).add(model).add(graph).add(tree_edit).add(alignment).add(output).add(help_update);
     min_desc.add(minimal).add(reads_alignment).add(help_update);
 
 
