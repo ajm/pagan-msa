@@ -317,8 +317,8 @@ void Reads_aligner::create_clusters(Node *root, vector<Fasta_entry> *reads, Mode
         this->remove_overlapping_reads(reads, mf);
     }
     
-    if(not (Settings_handle::st.is("pileup-alignment") && Settings_handle::st.is("queryfile") && !Settings_handle::st.is("ref-seqfile"))) {
-        Log_output::write_out(" Error: '--create-clusters' can only be used with '--pileup-alignment', '--queryfile' and not '--ref-seqfile'.\n", 2);
+    if(not (Settings_handle::st.is("queryfile") && !Settings_handle::st.is("ref-seqfile"))) {
+        Log_output::write_out(" Error: '--create-clusters' can only be used with '--queryfile' and not '--ref-seqfile'.\n", 2);
         abort();
     }
 
